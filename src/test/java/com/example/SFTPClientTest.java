@@ -21,6 +21,7 @@ public class SFTPClientTest {
 
     @BeforeClass
     public void loadConfig() {
+        // загрузка конфигурации для подключения к серверу
         try (InputStream input = SFTPClientTest.class.getClassLoader().getResourceAsStream("config.properties")) {
             Properties prop = new Properties();
             prop.load(input);

@@ -6,8 +6,7 @@ import java.io.*;
 import java.util.*;
 
 public class SFTPClient {
-    private static final String FILE_NAME = "test.json"; // заменить на необходимое
-    private static SFTPConnection sftpConnection = new SFTPConnection();
+    private static final SFTPConnection sftpConnection = new SFTPConnection();
 
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
@@ -35,7 +34,7 @@ public class SFTPClient {
         }
     }
 
-    private static void showMenu(Scanner scanner) throws JSchException {
+    private static void showMenu(Scanner scanner) {
         ChannelSftp channelSftp = null;
         try {
             channelSftp = sftpConnection.getChannelSftp();
@@ -95,12 +94,24 @@ public class SFTPClient {
     }
 
     // Получение domain-IP пары
-    private static List<Map<String, String>> getDomainIPPairs(ChannelSftp channelSftp) throws SftpException{
+    private static List<Map<String, String>> getDomainIPPairs(ChannelSftp channelSftp) throws SftpException {
         String content = getFileContent(channelSftp);
         List<Map<String, String>> pairs = new ArrayList<>();
 
         if (!content.trim().isEmpty() && content.contains("addresses")) {
-            String jsonArray = content.split(":\\[")[1].split("]")[0]; // взятие массива JSON
+            // регулярное выражение, позволяющее пробелы между ":" и "["
+            String[] parts = content.split(":\\s*\\[");
+            if (parts.length < 2) {
+                System.err.println("Неверный формат JSON: отсутствует ожидаемый разделитель \":[\".");
+                return pairs;
+            }
+            String jsonArrayPart = parts[1];
+            String[] closingBracketSplit = jsonArrayPart.split("]");
+            if (closingBracketSplit.length < 1) {
+                System.err.println("Неверный формат JSON: отсутствует закрывающая скобка ']'.");
+                return pairs;
+            }
+            String jsonArray = closingBracketSplit[0].replaceAll("\\s+", ""); // взятие массива JSON
             String[] entries = jsonArray.split("},\\{"); // разделение пар
 
             for (String entry : entries) {
@@ -112,6 +123,8 @@ public class SFTPClient {
                     String[] keyValue = field.split(":");
                     if (keyValue.length == 2) {
                         pair.put(keyValue[0].trim(), keyValue[1].trim());
+                    } else {
+                        System.err.println("Неверный формат пары: " + field);
                     }
                 }
                 pairs.add(pair);
@@ -120,11 +133,27 @@ public class SFTPClient {
         return pairs;
     }
 
+    // Поиск json-файла на сервере
+    private static String findJsonFile(ChannelSftp channelSftp) throws SftpException {
+        // получение списка файлов в текущей директории
+        @SuppressWarnings("unchecked")
+        Vector<ChannelSftp.LsEntry> files = channelSftp.ls(".");
+        for (ChannelSftp.LsEntry entry : files) {
+            String filename = entry.getFilename();
+            // пропуск служебных записей "." и ".."
+            if (!".".equals(filename) && !"..".equals(filename)
+                    && filename.toLowerCase().endsWith(".json")) {
+                return filename;
+            }
+        }
+        throw new SftpException(0, "JSON файл не найден");
+    }
+
     // Чтение файла
     private static String getFileContent(ChannelSftp channelSftp) throws SftpException {
-//        System.out.println("Чтение файла: " + FILE_NAME);
+        String jsonFileName = findJsonFile(channelSftp);
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream(); // запись на временное хранение в виде байт
-        channelSftp.get(FILE_NAME, outputStream); // запись в поток из файла
+        channelSftp.get(jsonFileName, outputStream); // запись в поток из файла
         return outputStream.toString();
     }
 
@@ -223,9 +252,10 @@ public class SFTPClient {
 
         jsonBuilder.append("]}");
 
+        String jsonFileName = findJsonFile(channelSftp);
         ByteArrayInputStream inputStream = new ByteArrayInputStream(jsonBuilder.toString().getBytes());
         try {
-            channelSftp.put(inputStream, FILE_NAME, ChannelSftp.OVERWRITE);
+            channelSftp.put(inputStream, jsonFileName, ChannelSftp.OVERWRITE);
             System.out.println("Файл обновлен!");
         } catch (SftpException e) {
             System.err.println("Ошибка при записи файла на сервер: " + e.getMessage());
